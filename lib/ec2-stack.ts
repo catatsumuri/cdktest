@@ -22,11 +22,20 @@ export class Ec2Stack extends cdk.Stack {
             'ap-northeast-1': 'ami-01ff1fcabf5f7572c',
         });
 
+        const userData = ec2.UserData.forLinux();
+        userData.addCommands(
+            'apt update -y',
+            'apt install -y apache2',
+            'systemctl enable apache2',
+            'systemctl start apache2'
+        );
+
         const instance = new ec2.Instance(this, 'WebServer', {
             vpc: props.vpc,
             instanceType: new ec2.InstanceType('t3.micro'),
             machineImage: ami,
             role,
+            userData,
         });
 
         instance.connections.allowFromAnyIpv4(ec2.Port.tcp(80), 'HTTP');
