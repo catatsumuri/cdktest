@@ -2,10 +2,14 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 
+interface VpcStackProps extends cdk.StackProps {
+  envName: 'dev' | 'prod';
+}
+
 export class VpcStack extends cdk.Stack {
     public readonly vpc: ec2.Vpc;
 
-    constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    constructor(scope: Construct, id: string, props: VpcStackProps) {
         super(scope, id, props);
 
         // NATなし、パブリックサブネットのみのVPC
@@ -19,6 +23,10 @@ export class VpcStack extends cdk.Stack {
                     cidrMask: 24,
                 },
             ],
+        });
+        new cdk.CfnOutput(this, 'CurrentEnv', {
+            value: props.envName,
+            description: 'Current environment name (dev or prod)',
         });
     }
 }
