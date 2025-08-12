@@ -17,4 +17,6 @@ const vpcStack = new VpcStack(app, `VpcStack-${envName}`, {
 
 new Ec2Stack(app, `Ec2Stack-${envName}`, {
   vpc: vpcStack.vpc,
+  envName,
+  // env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
 });

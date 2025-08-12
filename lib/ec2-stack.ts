@@ -5,6 +5,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 
 interface Ec2StackProps extends cdk.StackProps {
     vpc: ec2.IVpc;
+    envName: 'dev' | 'prod';
 }
 
 export class Ec2Stack extends cdk.Stack {
@@ -24,8 +25,10 @@ export class Ec2Stack extends cdk.Stack {
 
         const userData = ec2.UserData.forLinux();
         userData.addCommands(
-            'apt update -y',
-            'apt install -y apache2',
+            'set -euxo pipefail',
+            'export DEBIAN_FRONTEND=noninteractive',
+            'apt-get update -y',
+            'apt-get install -y apache2',
             'systemctl enable apache2',
             'systemctl start apache2'
         );
