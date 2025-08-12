@@ -7,7 +7,7 @@ const app = new cdk.App();
 const envName = app.node.tryGetContext('env') || 'dev';
 
 // 共通タグ
-cdk.Tags.of(app).add('env', envName);
+cdk.Tags.of(app).add('Env', envName);
 
 // スタック名にenvを含めてdev/prod共存可能に
 const vpcStack = new VpcStack(app, `VpcStack-${envName}`, {
