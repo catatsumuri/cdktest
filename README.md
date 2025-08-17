@@ -1,14 +1,27 @@
-# Welcome to your CDK TypeScript project
+# CDK TypeScript Project
 
-This is a blank project for CDK development with TypeScript.
-
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
+このリポジトリは AWS CDK を用いた TypeScript プロジェクトである。`cdk.json` は CDK Toolkit にアプリの実行方法を指示する。
 
 ## Useful commands
 
-* `npm run build`   compile typescript to js
-* `npm run watch`   watch for changes and compile
-* `npm run test`    perform the jest unit tests
-* `npx cdk deploy`  deploy this stack to your default AWS account/region
-* `npx cdk diff`    compare deployed stack with current state
-* `npx cdk synth`   emits the synthesized CloudFormation template
+* `npm run build`   TypeScript をコンパイルして JS を生成
+* `npm run watch`   ファイル変更を監視し自動コンパイル
+* `npm run test`    Jest によるユニットテストを実行
+* `npx cdk deploy`  スタックをデプロイ
+* `npx cdk diff`    現在の状態とデプロイ済みとの差分を比較
+* `npx cdk synth`   CloudFormation テンプレートを生成
+
+
+### タスクへ接続するコマンド例
+
+```sh
+aws ecs execute-command \
+  --region ap-northeast-1 \
+  --cluster <CLUSTER_NAME> \
+  --task <TASK_ID> \
+  --container <CONTAINER_NAME> \
+  --interactive \
+  --command "/bin/sh"
+```
+
+この設定により、稼働中のタスクに直接シェルで接続できるようになる。

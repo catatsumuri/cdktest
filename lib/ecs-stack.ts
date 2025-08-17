@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
+import * as iam from 'aws-cdk-lib/aws-iam';
 
 interface EcsStackProps extends cdk.StackProps {
     envName: 'dev' | 'prod';
@@ -32,6 +33,19 @@ export class EcsStack extends cdk.Stack {
             portMappings: [{ containerPort: 80 }],
             logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'nginx' }),
         });
+        // (必須) SSM Messages チャネル用の権限
+        taskDef.addToTaskRolePolicy(
+            new iam.PolicyStatement({
+                actions: [
+                    'ssmmessages:CreateControlChannel',
+                    'ssmmessages:CreateDataChannel',
+                    'ssmmessages:OpenControlChannel',
+                    'ssmmessages:OpenDataChannel',
+                ],
+                resources: ['*'],
+            }),
+        );
+
         const sg = new ec2.SecurityGroup(this, 'NginxSvcSg', {
             vpc: props.vpc,
             allowAllOutbound: true,
@@ -47,6 +61,7 @@ export class EcsStack extends cdk.Stack {
             vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
             assignPublicIp: true,
             securityGroups: [sg],
+            enableExecuteCommand: true,
         });
     }
 }
