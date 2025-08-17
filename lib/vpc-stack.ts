@@ -3,7 +3,7 @@ import { Construct } from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 
 interface VpcStackProps extends cdk.StackProps {
-  envName: 'dev' | 'prod';
+    envName: 'dev' | 'prod';
 }
 
 export class VpcStack extends cdk.Stack {
@@ -14,7 +14,7 @@ export class VpcStack extends cdk.Stack {
 
         // NATなし、パブリックサブネットのみのVPC
         this.vpc = new ec2.Vpc(this, 'MyVpc', {
-            maxAzs: 2, // 2つのAZに配置
+            availabilityZones: ['ap-northeast-1c', 'ap-northeast-1d'],
             natGateways: 0, // NAT Gatewayは作らない
             subnetConfiguration: [
                 {
