@@ -16,6 +16,7 @@ export class VpcStack extends cdk.Stack {
         this.vpc = new ec2.Vpc(this, 'MyVpc', {
             availabilityZones: ['ap-northeast-1c', 'ap-northeast-1d'],
             natGateways: 0, // NAT Gatewayは作らない
+            restrictDefaultSecurityGroup: false,
             subnetConfiguration: [
                 {
                     subnetType: ec2.SubnetType.PUBLIC,

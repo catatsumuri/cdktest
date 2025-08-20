@@ -3,6 +3,7 @@ import { Construct } from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as logs from 'aws-cdk-lib/aws-logs';
 
 interface EcsStackProps extends cdk.StackProps {
     envName: 'dev' | 'prod';
@@ -15,13 +16,43 @@ export class EcsStack extends cdk.Stack {
     constructor(scope: Construct, id: string, props: EcsStackProps) {
         super(scope, id, props);
 
-        this.cluster = new ecs.Cluster(this, 'EcsCluster', {
-            vpc: props.vpc,
-            clusterName: `ecs-cluster-${props.envName}`,
-            containerInsights: props.envName === 'prod',
+        const isDev = props.envName === 'dev';
+        const clusterName = `ecs-cluster-${props.envName}`;
+        const webServiceName = `${props.envName}-web`;
+
+        const webLogGroupName = `/aws/ecs/${clusterName}/${webServiceName}`;
+        const execLogGroupName = `/aws/ecs/${clusterName}/exec`;
+
+
+        // Upsert
+        new logs.LogRetention(this, 'WebLogRetention', {
+            logGroupName: webLogGroupName,
+            retention: isDev ? logs.RetentionDays.TWO_WEEKS : logs.RetentionDays.SIX_MONTHS,
+        });
+        // Exec ログ用 LogGroup を用意（上書き先）
+        new logs.LogRetention(this, 'ExecLogRetention', {
+            logGroupName: execLogGroupName,
+            retention: isDev ? logs.RetentionDays.ONE_WEEK : logs.RetentionDays.ONE_MONTH,
         });
 
-        const taskDef = new ecs.FargateTaskDefinition(this, 'NginxTaskDef', {
+        // 以降は参照のみ（＝CFNが再作成しに行かない）
+        const webLogGroup = logs.LogGroup.fromLogGroupName(this, 'WebLogGroupImported', webLogGroupName);
+        const execLogGroup = logs.LogGroup.fromLogGroupName(this, 'ExecLogGroupImported', execLogGroupName);
+
+        this.cluster = new ecs.Cluster(this, 'EcsCluster', {
+            vpc: props.vpc,
+            clusterName,
+            containerInsights: !isDev,
+            executeCommandConfiguration: {
+                logging: ecs.ExecuteCommandLogging.OVERRIDE,
+                logConfiguration: {
+                    cloudWatchLogGroup: execLogGroup,
+                    cloudWatchEncryptionEnabled: false,
+                },
+            },
+        });
+
+        const taskDef = new ecs.FargateTaskDefinition(this, 'WebTaskDef', {
             cpu: 256, // 最小クラス
             memoryLimitMiB: 512, // 最小メモリ
         });
@@ -31,8 +62,12 @@ export class EcsStack extends cdk.Stack {
             // Docker Hub ではなく Public ECR ミラーを使う
             image: ecs.ContainerImage.fromRegistry('public.ecr.aws/nginx/nginx:stable'),
             portMappings: [{ containerPort: 80 }],
-            logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'nginx' }),
+            logging: ecs.LogDrivers.awsLogs({
+                logGroup: webLogGroup,
+                streamPrefix: 'nginx', // 役割だけをprefixに
+            }),
         });
+
         // (必須) SSM Messages チャネル用の権限
         taskDef.addToTaskRolePolicy(
             new iam.PolicyStatement({
@@ -46,15 +81,15 @@ export class EcsStack extends cdk.Stack {
             }),
         );
 
-        const sg = new ec2.SecurityGroup(this, 'NginxSvcSg', {
+        const sg = new ec2.SecurityGroup(this, 'WebSvcSg', {
             vpc: props.vpc,
             allowAllOutbound: true,
-            description: 'Allow HTTP from anywhere for nginx (training only)',
+            description: `Allow HTTP from anywhere for web (${isDev ? 'dev' : 'prod'})`,
         });
         sg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'HTTP');
 
         // サービス（単一タスク、ALBなし、Public直当て）
-        new ecs.FargateService(this, 'NginxService', {
+        new ecs.FargateService(this, 'WebService', {
             cluster: this.cluster,
             taskDefinition: taskDef,
             desiredCount: 1,
@@ -62,6 +97,7 @@ export class EcsStack extends cdk.Stack {
             assignPublicIp: true,
             securityGroups: [sg],
             enableExecuteCommand: true,
+            serviceName: webServiceName, // dev-web / prod-web
         });
     }
 }
