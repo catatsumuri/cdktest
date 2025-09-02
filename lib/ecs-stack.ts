@@ -7,6 +7,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 
+
 interface EcsStackProps extends cdk.StackProps {
     envName: 'dev' | 'prod';
     vpc: ec2.IVpc;
@@ -59,6 +60,24 @@ export class EcsStack extends cdk.Stack {
             memoryLimitMiB: 512, // 最小メモリ
         });
 
+        const messageParam = ssm.StringParameter.fromStringParameterName(
+            this,
+            'MessageParam',
+            `/demo/${props.envName}/message`,
+        );
+        const dbPasswordParam = ssm.StringParameter.fromSecureStringParameterAttributes(
+            this,
+            'DbPasswordParam',
+            {
+                parameterName: `/demo/${props.envName}/db_password`,
+                // version: 1, // 必要なら固定
+            },
+        );
+        // 起動時に ECS が取りに行くので executionRole にのみ付与（最小権限）
+        const execRole = taskDef.obtainExecutionRole();
+        messageParam.grantRead(execRole);
+        dbPasswordParam.grantRead(execRole);
+
         taskDef.addContainer('NginxContainer', {
             // image: ecs.ContainerImage.fromRegistry('nginx:latest'), // Docker Hub
             // Docker Hub ではなく Public ECR ミラーを使う
@@ -72,6 +91,7 @@ export class EcsStack extends cdk.Stack {
                 APP_MESSAGE: ecs.Secret.fromSsmParameter(messageParam),
                 DB_PASSWORD: ecs.Secret.fromSsmParameter(dbPasswordParam),
             },
+
             command: [
                 'sh',
                 '-c',
