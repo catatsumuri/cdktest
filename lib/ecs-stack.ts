@@ -4,6 +4,8 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
+import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 
 interface EcsStackProps extends cdk.StackProps {
     envName: 'dev' | 'prod';
@@ -66,6 +68,27 @@ export class EcsStack extends cdk.Stack {
                 logGroup: webLogGroup,
                 streamPrefix: 'nginx', // 役割だけをprefixに
             }),
+            secrets: {
+                APP_MESSAGE: ecs.Secret.fromSsmParameter(messageParam),
+                DB_PASSWORD: ecs.Secret.fromSsmParameter(dbPasswordParam),
+            },
+            command: [
+                'sh',
+                '-c',
+                [
+                    // タスクごとに異なる識別子（ホスト名＝コンテナID相当 & ランダムUUID）
+                    'HOST=$(cat /etc/hostname)',
+                    'UUID=$(cat /proc/sys/kernel/random/uuid)',
+                    // 適当なHTMLを書き込み
+                    'mkdir -p /usr/share/nginx/html',
+                    'echo "<html><body style=\'font-family:sans-serif\'>" > /usr/share/nginx/html/index.html',
+                    'echo "<h1>Hello from $HOST</h1>" >> /usr/share/nginx/html/index.html',
+                    'echo "<p>uuid: $UUID</p>" >> /usr/share/nginx/html/index.html',
+                    'echo "</body></html>" >> /usr/share/nginx/html/index.html',
+                    // nginx をフォアグラウンドで
+                    "nginx -g 'daemon off;'",
+                ].join(' && '),
+            ],
         });
 
         // (必須) SSM Messages チャネル用の権限
@@ -81,23 +104,59 @@ export class EcsStack extends cdk.Stack {
             }),
         );
 
-        const sg = new ec2.SecurityGroup(this, 'WebSvcSg', {
+        const albSg = new ec2.SecurityGroup(this, 'AlbSg', {
             vpc: props.vpc,
             allowAllOutbound: true,
-            description: `Allow HTTP from anywhere for web (${isDev ? 'dev' : 'prod'})`,
+            description: 'ALB security group',
         });
-        sg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'HTTP');
+        // インターネットから80番だけ開放（HTTPS不要とのことなので443は作らない）
+        albSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'HTTP from Internet');
+
+        const alb = new elbv2.ApplicationLoadBalancer(this, 'Alb', {
+            vpc: props.vpc,
+            internetFacing: true,
+            securityGroup: albSg,
+            vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+        });
+
+        // Target Group（Fargate=IPターゲット）
+        const tg = new elbv2.ApplicationTargetGroup(this, 'WebTg', {
+            vpc: props.vpc,
+            port: 80,
+            protocol: elbv2.ApplicationProtocol.HTTP,
+            targetType: elbv2.TargetType.IP,
+            healthCheck: {
+                path: '/', // 必要に応じて /health へ
+                interval: cdk.Duration.seconds(30),
+                // 200 だけに縛ると事故りやすい。実運用は 200-399 を推奨
+                healthyHttpCodes: '200-399',
+            },
+        });
+
+        // HTTP/80 リスナーを作って TG へフォワード
+        const httpListener = alb.addListener('HttpListener', { port: 80, open: true });
+        httpListener.addTargetGroups('DefaultTg', { targetGroups: [tg] });
+
+        const srvSg = new ec2.SecurityGroup(this, 'WebSvcSg', {
+            vpc: props.vpc,
+            allowAllOutbound: true,
+            description: `Allow HTTP only from ALB for web (${isDev ? 'dev' : 'prod'})`,
+        });
+        srvSg.addIngressRule(albSg, ec2.Port.tcp(80), 'HTTP from ALB');
 
         // サービス（単一タスク、ALBなし、Public直当て）
-        new ecs.FargateService(this, 'WebService', {
+        const service = new ecs.FargateService(this, 'WebService', {
             cluster: this.cluster,
             taskDefinition: taskDef,
-            desiredCount: 1,
+            desiredCount: 2,
             vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
             assignPublicIp: true,
-            securityGroups: [sg],
+            securityGroups: [srvSg],
             enableExecuteCommand: true,
             serviceName: webServiceName, // dev-web / prod-web
         });
+
+        // サービスをターゲットグループに登録（タスクENIのIPが自動でTGに入る）
+        service.attachToApplicationTargetGroup(tg);
     }
 }
