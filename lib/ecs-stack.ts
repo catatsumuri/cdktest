@@ -192,41 +192,18 @@ exec nginx -g 'daemon off;'
             enableExecuteCommand: true,
             serviceName: webServiceName, // dev-web / prod-web
         });
-        // Auto Scaling（ALB指標ベースへ切り替え）
+
+        // Auto Scaling: CPU 80%を目標（常時100%なので必ず増殖→maxまで）
         const scalable = service.autoScaleTaskCount({
             minCapacity: 2, // 既定 desiredCount と合わせる
             maxCapacity: 3, // 観察用に抑えめ（必要なら増やす）
         });
 
-        // --- A) RequestCountPerTarget を用いたターゲットトラッキング ---
-        // 1 ターゲットあたりの 1 分平均リクエスト数を一定値に保つ
-        const reqPerTarget = tg.metricRequestCountPerTarget({
-            period: cdk.Duration.minutes(1),
-            statistic: 'avg',
-        });
-        scalable.scaleToTrackCustomMetric('TT-ReqPerTarget', {
-            targetValue: 80, // 目安: 1ターゲット/分あたり 80 req
-            metric: reqPerTarget,
-            scaleOutCooldown: cdk.Duration.seconds(60),
-            scaleInCooldown: cdk.Duration.minutes(5),
-        });
-
-        // --- B) TargetResponseTime を用いたステップスケーリング（任意） ---
-        // p90 で 0.5s を超えたら拡大、0.3s 未満なら縮小 などの階段ルール
-        const latencyP90 = tg.metricTargetResponseTime({
-            period: cdk.Duration.minutes(1),
-            statistic: 'p90',
-        });
-        scalable.scaleOnMetric('Step-LatencyP90', {
-            metric: latencyP90,
-            scalingSteps: [
-                { upper: 0.30, change: -1 }, // p90 < 300ms → 1 減らす
-                { lower: 0.50, change: +1 }, // 500ms 以上 → 1 増やす
-                { lower: 1.00, change: +2 }, // 1.0s 以上 → さらに増やす
-            ],
-            adjustmentType: appscaling.AdjustmentType.CHANGE_IN_CAPACITY,
-            cooldown: cdk.Duration.seconds(90),
-            metricAggregationType: appscaling.MetricAggregationType.AVERAGE,
+        scalable.scaleOnCpuUtilization('CPU80', {
+            targetUtilizationPercent: 80,
+            // 観察が目的なので縮小は遅らせる／拡大は早め
+            scaleOutCooldown: cdk.Duration.seconds(30),
+            scaleInCooldown: cdk.Duration.minutes(10),
         });
 
         // サービスをターゲットグループに登録（タスクENIのIPが自動でTGに入る）
