@@ -181,7 +181,7 @@ exec nginx -g 'daemon off;'
         });
         srvSg.addIngressRule(albSg, ec2.Port.tcp(80), 'HTTP from ALB');
 
-        // サービス（単一タスク、ALBなし、Public直当て）
+        // サービス（キャパシティープロバイダー戦略を使用）
         const service = new ecs.FargateService(this, 'WebService', {
             cluster: this.cluster,
             taskDefinition: taskDef,
@@ -191,6 +191,18 @@ exec nginx -g 'daemon off;'
             securityGroups: [srvSg],
             enableExecuteCommand: true,
             serviceName: webServiceName, // dev-web / prod-web
+            capacityProviderStrategies: [
+                {
+                    capacityProvider: 'FARGATE',
+                    weight: 1,
+                    base: 0,
+                },
+                {
+                    capacityProvider: 'FARGATE_SPOT',
+                    weight: 1, 
+                    base: 0,
+                }
+            ],
         });
 
         // Auto Scaling: CPU 80%を目標（常時100%なので必ず増殖→maxまで）
